@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>System Admin Setup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="bg-white p-8 rounded-xl shadow-xl max-w-4xl w-full grid md:grid-cols-2 gap-8">
+
+        <!-- Section 1: Generate Students (Same as before) -->
+        <div class="space-y-4 border-b md:border-b-0 md:border-r border-slate-200 pb-6 md:pb-0 md:pr-6">
+            <h2 class="text-xl font-bold flex items-center gap-2">
+                <i data-lucide="users" class="text-blue-600"></i> 1. Generate Students
+            </h2>
+            <p class="text-sm text-slate-500">Creates 50 random students for testing.</p>
+            <button onclick="generateStudents()" id="btnStudent"
+                class="w-full py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700">
+                Generate Student Data
+            </button>
+            <p id="statusStudent" class="text-xs font-mono text-slate-600"></p>
+        </div>
+
+        <!-- Section 2: Bulk Teacher Setup -->
+        <div class="space-y-4">
+            <h2 class="text-xl font-bold flex items-center gap-2">
+                <i data-lucide="user-plus" class="text-purple-600"></i> 2. Add Teachers
+            </h2>
+            <p class="text-sm text-slate-500">Grant admin access to multiple teachers for a specific college.</p>
+
+            <div class="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">College Name</label>
+                    <select id="collegeSelect" class="w-full p-2 border rounded text-sm">
+                        <option value="PIET">PIET</option>
+                        <option value="MIT University">MIT University</option>
+                        <option value="IIT Delhi">IIT Delhi</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Number of Teachers</label>
+                    <input type="number" id="teacherCount" value="15" class="w-full p-2 border rounded text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Email Prefix</label>
+                    <input type="text" id="emailPrefix" value="teacher" class="w-full p-2 border rounded text-sm">
+                    <p class="text-xs text-slate-400 mt-1">Ex: 'teacher' creates teacher1@piet.edu, teacher2...</p>
+                </div>
+            </div>
+
+            <button onclick="generateTeachers()" id="btnTeacher"
+                class="w-full py-2 bg-purple-600 text-white rounded font-medium hover:bg-purple-700">
+                Create Teacher Permissions
+            </button>
+            <div id="statusTeacher"
+                class="text-xs font-mono text-slate-600 h-24 overflow-y-auto border p-2 rounded bg-slate-50 hidden">
+            </div>
+        </div>
+    </div>
+
+    <!-- FIREBASE -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <script>
+        lucide.createIcons();
+
+        // ------------------------------------------------
+        // PASTE YOUR FIREBASE KEYS HERE
+        // ------------------------------------------------
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+        const firebaseConfig = {
+            apiKey: "AIzaSyBpAWBzA5mF5_s8zcBqsQvjFpoyfzRM-aA",
+            authDomain: "techsprint-40240.firebaseapp.com",
+            projectId: "techsprint-40240",
+            storageBucket: "techsprint-40240.firebasestorage.app",
+            messagingSenderId: "692880588949",
+            appId: "1:692880588949:web:f05f84c69d97511ca6db9c",
+            measurementId: "G-50VW6Z2DZ7"
+        };
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // 1. Generate Students Logic
+        async function generateStudents() {
+            const btn = document.getElementById('btnStudent');
+            const status = document.getElementById('statusStudent');
+            btn.disabled = true; btn.innerText = "Working...";
+
+            const colleges = ["MIT University", "IIT Delhi", "Stanford", "PIET"];
+            const tracks = ["Full Stack Dev", "Data Science", "AI/ML", "UI/UX Design"];
+            const statuses = ["Active", "Active", "Pending", "Completed"];
+
+            let batch = db.batch();
+            for (let i = 0; i < 50; i++) {
+                const ref = db.collection('students').doc();
+                batch.set(ref, {
+                    name: `Student ${Math.floor(Math.random() * 9000) + 1000}`,
+                    college: colleges[Math.floor(Math.random() * colleges.length)],
+                    track: tracks[Math.floor(Math.random() * tracks.length)],
+                    status: statuses[Math.floor(Math.random() * statuses.length)],
+                    joinedAt: new Date().toISOString()
+                });
+            }
+            await batch.commit();
+            status.innerText = "Success: 50 students added.";
+            btn.innerText = "Done";
+        }
+
+        // 2. Generate Teachers Logic
+        async function generateTeachers() {
+            const btn = document.getElementById('btnTeacher');
+            const statusBox = document.getElementById('statusTeacher');
+            const college = document.getElementById('collegeSelect').value;
+            const count = parseInt(document.getElementById('teacherCount').value);
+            const prefix = document.getElementById('emailPrefix').value;
+
+            // Domain mapping for realism
+            let domain = "skillforge.edu";
+            if (college === "PIET") domain = "piet.edu";
+            if (college === "MIT University") domain = "mit.edu";
+
+            btn.disabled = true;
+            btn.innerText = "Creating Permissions...";
+            statusBox.classList.remove('hidden');
+            statusBox.innerHTML = "";
+
+            let batch = db.batch();
+            let log = "";
+
+            for (let i = 1; i <= count; i++) {
+                // Example: teacher1@piet.edu
+                const email = `${prefix}${i}@${domain}`;
+
+                const ref = db.collection('admins').doc(email);
+                batch.set(ref, {
+                    role: 'college_admin',
+                    college: college,
+                    createdAt: new Date().toISOString()
+                });
+
+                log += `<div>✅ ${email} -> ${college} Admin</div>`;
+            }
+
+            try {
+                await batch.commit();
+                statusBox.innerHTML = log + "<div class='font-bold text-green-600 mt-2'>All permissions saved to Database!</div>";
+                btn.innerText = "Done";
+
+                // Alert user about next step
+                setTimeout(() => {
+                    alert(`Success! Database permissions created for ${count} teachers.\n\nIMPORTANT: You must now go to Firebase Console > Authentication and create these users (Email/Password) so they can actually log in.`);
+                }, 500);
+
+            } catch (error) {
+                statusBox.innerHTML = `<span class="text-red-600">Error: ${error.message}</span>`;
+            }
+        }
+    </script>
+</body>
+
+</html>

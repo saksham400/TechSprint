@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkillForge - Python Certification</title>
+    
+    <!-- External SDKs -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    
+    <!-- AI Proctoring: MediaPipe & TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; user-select: none; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .blur-content { filter: blur(20px); pointer-events: none; }
+        #console-output { background: #0f172a; color: #cbd5e1; border-radius: 0 0 1.5rem 1.5rem; }
+        .error-text { color: #f87171; }
+        .success-text { color: #4ade80; }
+        .proctor-feed { border: 2px solid #6366f1; box-shadow: 0 0 20px rgba(99, 102, 241, 0.3); }
+        .status-dot { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden text-slate-700" oncontextmenu="return false;">
+
+    <!-- AI PROCTORING FLOATING FEED -->
+    <div id="aiCameraContainer" class="fixed bottom-6 right-6 z-[1000] hidden">
+        <div class="relative w-48 h-36 bg-slate-900 rounded-2xl overflow-hidden proctor-feed">
+            <video id="proctorVideo" class="w-full h-full object-cover scale-x-[-1]" autoplay playsinline muted></video>
+            <div class="absolute top-2 left-2 flex items-center gap-1.5 bg-black/40 backdrop-blur-md px-2 py-1 rounded-md">
+                <div class="w-2 h-2 bg-red-500 rounded-full status-dot"></div>
+                <span class="text-[10px] font-bold text-white uppercase tracking-widest">AI Multi-Scan</span>
+            </div>
+            <div id="aiWarning" class="absolute inset-0 bg-red-600/90 flex items-center justify-center text-white text-[10px] font-bold uppercase text-center p-2 hidden">
+                Violation Detected
+            </div>
+        </div>
+    </div>
+
+    <!-- LOADING OVERLAY -->
+    <div id="loadingOverlay" class="fixed inset-0 z-[500] bg-white flex flex-col items-center justify-center">
+        <div class="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p class="font-bold text-slate-900">Initializing Secure Environment...</p>
+        <p class="text-xs text-slate-400 mt-2">Loading Face Mesh & Object Detection Models</p>
+    </div>
+
+    <!-- START OVERLAY -->
+    <div id="rulesOverlay" class="fixed inset-0 z-[100] bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-white max-w-lg w-full rounded-[2.5rem] shadow-2xl p-10 text-center border border-white">
+            <div class="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-indigo-200">
+                <i data-lucide="shield-check" class="w-10 h-10 text-white"></i>
+            </div>
+            <h1 class="text-3xl font-bold text-slate-900 mb-2">Secure Certification</h1>
+            <p class="text-slate-500 mb-8 text-sm">AI Proctoring is active. The system detects tab switching, looking away, multiple people, and <b>mobile phone usage</b>.</p>
+            <button onclick="startSecureTest()" class="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
+                Start Proctored Exam
+            </button>
+        </div>
+    </div>
+
+    <!-- VIOLATION MODAL -->
+    <div id="violationModal" class="hidden fixed inset-0 z-[1100] bg-red-600/10 backdrop-blur-md flex items-center justify-center">
+        <div class="bg-white rounded-[2rem] p-10 max-w-sm text-center shadow-2xl">
+            <i data-lucide="alert-circle" class="w-16 h-16 text-red-500 mx-auto mb-4 animate-bounce"></i>
+            <h2 class="text-2xl font-bold text-slate-900 mb-2">Security Breach</h2>
+            <p id="violationText" class="text-slate-500 mb-6">Violation detected.</p>
+            <div class="flex justify-center gap-3 mb-8" id="lifeContainer">
+                <div class="w-3 h-3 rounded-full bg-red-500"></div><div class="w-3 h-3 rounded-full bg-red-500"></div><div class="w-3 h-3 rounded-full bg-red-500"></div>
+            </div>
+            <button onclick="resumeTest()" class="w-full py-3 bg-slate-900 text-white rounded-xl font-bold">Resume Test</button>
+        </div>
+    </div>
+
+    <!-- RESULTS PAGE -->
+    <div id="resultsPage" class="fixed inset-0 z-[600] bg-slate-50 overflow-y-auto hidden">
+        <div class="max-w-4xl mx-auto py-20 px-6">
+            <div class="text-center mb-12">
+                <div class="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center mx-auto mb-6 text-white shadow-xl shadow-indigo-200">
+                    <i data-lucide="award" class="w-10 h-10"></i>
+                </div>
+                <h1 class="text-4xl font-extrabold text-slate-900 mb-2">Certification Results</h1>
+            </div>
+            <div class="grid md:grid-cols-3 gap-6 mb-12">
+                <div class="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm text-center">
+                    <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">Score</p>
+                    <div class="text-5xl font-black text-indigo-600" id="resScore">0</div>
+                </div>
+                <div class="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col items-center justify-center">
+                    <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">Accuracy</p>
+                    <div class="w-20 h-20"><canvas id="accuracyChart"></canvas></div>
+                </div>
+                <div class="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm text-center">
+                    <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">Status</p>
+                    <div class="text-2xl font-black mt-2" id="resStatus">---</div>
+                </div>
+            </div>
+            <div class="flex justify-center"><button onclick="window.location.href='student_dashboard.html'" class="px-10 py-4 bg-slate-900 text-white font-bold rounded-2xl hover:bg-slate-800 transition-all">Go to Dashboard</button></div>
+        </div>
+    </div>
+
+    <!-- MAIN INTERFACE -->
+    <div id="testInterface" class="h-full flex flex-col blur-content transition-all duration-700">
+        <header class="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-10">
+            <div class="flex items-center gap-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold">Py</div>
+                    <div><h1 class="font-bold text-slate-900 leading-none">Python Masterclass</h1><p class="text-[10px] text-red-500 font-bold uppercase mt-1">AI Proctoring Active</p></div>
+                </div>
+            </div>
+            <div class="flex items-center gap-10">
+                <div class="text-right"><p class="text-[10px] font-bold text-slate-400 uppercase">Timer</p><p id="timer" class="font-mono text-xl font-bold text-slate-800">45:00</p></div>
+                <button onclick="submitFinal()" class="px-6 py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800">End Session</button>
+            </div>
+        </header>
+
+        <div class="h-1 bg-slate-100"><div id="progressBar" class="h-full bg-indigo-600 transition-all duration-500" style="width: 10%"></div></div>
+
+        <main class="flex-1 flex overflow-hidden">
+            <div class="w-1/2 overflow-y-auto p-12 bg-white flex flex-col border-r border-slate-200">
+                <div class="flex items-center justify-between mb-8">
+                    <span id="qNumber" class="text-indigo-600 font-bold text-xs uppercase tracking-widest">Task 01</span>
+                    <span id="qDifficulty" class="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-bold uppercase">Beginner</span>
+                </div>
+                <h2 id="qTitle" class="text-3xl font-bold text-slate-900 mb-4 leading-tight">...</h2>
+                <p id="qDesc" class="text-slate-500 leading-relaxed text-lg mb-10">...</p>
+
+                <div class="space-y-4">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-widest">Requirement</h4>
+                    <div class="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                        <div class="flex items-center gap-3"><div id="testStatus" class="w-5 h-5 rounded-full border-2 border-slate-300"></div><span class="text-sm font-medium text-slate-600">Stdout Match</span></div>
+                        <code id="qExpected" class="text-xs text-indigo-600 font-bold">...</code>
+                    </div>
+                </div>
+
+                <div class="mt-auto pt-10 flex gap-4">
+                    <button onclick="skipQuestion()" class="px-8 py-4 text-slate-400 font-bold hover:text-slate-600 transition-all">Skip</button>
+                    <button id="nextBtn" disabled onclick="nextQuestion()" class="flex-1 py-4 bg-slate-100 text-slate-400 cursor-not-allowed rounded-2xl font-bold transition-all">Next Question</button>
+                </div>
+            </div>
+
+            <div class="w-1/2 p-8 bg-slate-50 flex flex-col gap-6">
+                <div class="flex-[3] flex flex-col bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden">
+                    <div class="h-12 bg-slate-50 px-6 flex items-center justify-between border-b border-slate-100">
+                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">main.py</span>
+                        <button onclick="runCode()" class="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-700 transition-all"><i data-lucide="play" class="w-3 h-3 fill-current"></i> RUN CODE</button>
+                    </div>
+                    <textarea id="editor" class="flex-1 p-8 font-mono text-sm text-slate-700 outline-none resize-none leading-relaxed bg-white" spellcheck="false"></textarea>
+                </div>
+                <div id="console-output" class="flex-[1.5] p-6 font-mono text-xs overflow-y-auto whitespace-pre-wrap bg-slate-900 text-slate-300 rounded-b-[2rem]"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- CONFIG & STATE ---
+        const firebaseConfig = { apiKey: "AIzaSyBpAWBzA5mF5_s8zcBqsQvjFpoyfzRM-aA", authDomain: "techsprint-40240.firebaseapp.com", projectId: "techsprint-40240", storageBucket: "techsprint-40240.firebasestorage.app", messagingSenderId: "692880588949", appId: "1:692880588949:web:f05f84c69d97511ca6db9c" };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        let pyodide, currentIdx = 0, score = 0, violations = 0, testActive = false, timeLeft = 2700, capturedOutput = "", userAnswers = [];
+        let faceMissingTime = 0, lookingAwayTime = 0, lastFrameTime = Date.now(), proctorActive = false;
+        let objectDetector;
+
+        const questions = [
+            { title: 'The Python Greeting', difficulty: 'Beginner', desc: 'Output "Hello, World!"', expected: 'Hello, World!' },
+            { title: 'Arithmetic', difficulty: 'Beginner', desc: 'Define x=10, y=5 and print x + y', expected: '15' },
+            { title: 'List Sum', difficulty: 'Beginner', desc: 'Print sum of [1, 2, 3]', expected: '6' },
+            { title: 'Slicing', difficulty: 'Intermediate', desc: 'Print first 4 chars of "PythonMaster"', expected: 'Pyth' },
+            { title: 'Iteration', difficulty: 'Intermediate', desc: 'Print numbers 1 to 3 each on a new line.', expected: '1\n2\n3' },
+            { title: 'Dictionaries', difficulty: 'Intermediate', desc: 'Print value of "a" in {"a": 100}', expected: '100' },
+            { title: 'Functions', difficulty: 'Intermediate', desc: 'Define "f(x)" that returns x*2 and print f(5)', expected: '10' },
+            { title: 'Formatting', difficulty: 'Advanced', desc: 'Print "Age: 25" using an f-string with age=25', expected: 'Age: 25' },
+            { title: 'List Logic', difficulty: 'Advanced', desc: 'Use list comprehension to filter [1,2,3] for values > 1 and print it.', expected: '[2, 3]' },
+            { title: 'OOP', difficulty: 'Advanced', desc: 'Create class B with y=7 and print an instance\'s y.', expected: '7' }
+        ];
+
+        // --- AI PROCTORING ENGINE ---
+        async function startCameraProctoring() {
+            const video = document.getElementById("proctorVideo");
+            try {
+                // Load Object Detection Model (COCO-SSD)
+                objectDetector = await cocoSsd.load();
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                document.getElementById('aiCameraContainer').classList.remove('hidden');
+
+                // Load Face Mesh
+                const faceMesh = new FaceMesh({
+                    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+                });
+
+                faceMesh.setOptions({ maxNumFaces: 2, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                faceMesh.onResults(handleProctorResults);
+
+                const camera = new Camera(video, {
+                    onFrame: async () => { 
+                        if (proctorActive) {
+                            await faceMesh.send({ image: video });
+                            // Run Object Detection every 500ms to save resources
+                            if (Date.now() % 500 < 50) detectObjects(video);
+                        }
+                    },
+                    width: 640, height: 480
+                });
+                camera.start();
+            } catch (e) {
+                alert("Camera access is required for this proctored exam.");
+                window.location.href = 'student_dashboard.html';
+            }
+        }
+
+        async function detectObjects(video) {
+            const predictions = await objectDetector.detect(video);
+            predictions.forEach(p => {
+                if (p.class === 'cell phone' && p.score > 0.6) {
+                    showAIWarning("Mobile Phone Detected");
+                    triggerViolation("Unauthorized device (Mobile Phone) detected.");
+                }
+            });
+        }
+
+        function handleProctorResults(results) {
+            const now = Date.now();
+            const delta = (now - lastFrameTime) / 1000;
+            lastFrameTime = now;
+            const warningUI = document.getElementById('aiWarning');
+
+            if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+                faceMissingTime += delta;
+                if (faceMissingTime > 3) {
+                    showAIWarning("Face Not Detected");
+                    triggerViolation("Face not detected.");
+                    faceMissingTime = 0;
+                }
+                return;
+            } else { faceMissingTime = 0; }
+
+            if (results.multiFaceLandmarks.length > 1) {
+                showAIWarning("Multiple People");
+                triggerViolation("Multiple people detected in frame.");
+                return;
+            }
+
+            const nose = results.multiFaceLandmarks[0][1];
+            if (nose.x < 0.35 || nose.x > 0.65) {
+                lookingAwayTime += delta;
+                if (lookingAwayTime > 4) {
+                    showAIWarning("Looking Away");
+                    triggerViolation("Please look at the screen.");
+                    lookingAwayTime = 0;
+                }
+            } else { lookingAwayTime = 0; }
+        }
+
+        function showAIWarning(text) {
+            const ui = document.getElementById('aiWarning');
+            ui.innerText = text;
+            ui.classList.remove('hidden');
+            setTimeout(() => ui.classList.add('hidden'), 2000);
+        }
+
+        // --- CORE ENGINES ---
+        async function initPython() {
+            pyodide = await loadPyodide({ stdout: (t) => { capturedOutput += t + "\n"; } });
+            document.getElementById('loadingOverlay').classList.add('hidden');
+            lucide.createIcons();
+        }
+
+        async function runCode() {
+            capturedOutput = "";
+            const code = document.getElementById('editor').value;
+            const consoleBox = document.getElementById('console-output');
+            const q = questions[currentIdx];
+            consoleBox.innerHTML = ">>> Running...\n";
+            try {
+                await pyodide.runPythonAsync(code);
+                const out = capturedOutput.trim();
+                consoleBox.innerHTML += out + "\n";
+                if(out === q.expected.trim()) {
+                    consoleBox.innerHTML += `<span class="success-text">✔ VALIDATED</span>`;
+                    unlockNext();
+                } else {
+                    consoleBox.innerHTML += `<span class="error-text">✘ MISMATCH</span>`;
+                }
+            } catch (err) { consoleBox.innerHTML += `<span class="error-text">ERROR:</span>\n${err.message}`; }
+        }
+
+        function startSecureTest() {
+            document.documentElement.requestFullscreen().catch(()=>{});
+            document.getElementById('rulesOverlay').classList.add('hidden');
+            document.getElementById('testInterface').classList.remove('blur-content');
+            testActive = true;
+            proctorActive = true;
+            updateQuestion();
+            startTimer();
+            startCameraProctoring();
+
+            document.addEventListener("visibilitychange", () => { if(document.hidden && testActive) triggerViolation("Tab switching detected."); });
+            window.addEventListener("blur", () => { if(testActive) triggerViolation("Window focus lost."); });
+        }
+
+        function updateQuestion() {
+            const q = questions[currentIdx];
+            document.getElementById('qNumber').innerText = `Task ${currentIdx + 1}`;
+            document.getElementById('qTitle').innerText = q.title;
+            document.getElementById('qDesc').innerText = q.desc;
+            document.getElementById('qExpected').innerText = q.expected.split('\n')[0] + '...';
+            document.getElementById('editor').value = `# Task: ${q.title}\n`;
+            document.getElementById('console-output').innerHTML = "";
+            document.getElementById('progressBar').style.width = `${(currentIdx + 1) * 10}%`;
+            document.getElementById('nextBtn').disabled = true;
+            document.getElementById('nextBtn').className = "flex-1 py-4 bg-slate-100 text-slate-400 cursor-not-allowed rounded-2xl font-bold transition-all";
+        }
+
+        function unlockNext() {
+            const btn = document.getElementById('nextBtn');
+            btn.disabled = false;
+            btn.className = "flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-bold transition-all shadow-lg shadow-indigo-200";
+            document.getElementById('testStatus').className = "w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white";
+            document.getElementById('testStatus').innerHTML = '<i data-lucide="check" class="w-3 h-3"></i>';
+            lucide.createIcons();
+        }
+
+        function nextQuestion(skipped = false) {
+            userAnswers.push({ title: questions[currentIdx].title, status: skipped ? 'Skipped' : 'Correct' });
+            if(!skipped) score += 10;
+            if(currentIdx < 9) { currentIdx++; updateQuestion(); } 
+            else submitFinal();
+        }
+
+        function skipQuestion() { nextQuestion(true); }
+
+        function triggerViolation(reason) {
+            violations++;
+            document.getElementById('violationText').innerText = reason || "Security violation detected.";
+            const lives = document.getElementById('lifeContainer').children;
+            if(lives[3-violations]) lives[3-violations].classList.replace('bg-red-500', 'bg-slate-200');
+            if(violations >= 3) submitFinal(true);
+            else document.getElementById('violationModal').classList.remove('hidden');
+        }
+
+        function resumeTest() { document.documentElement.requestFullscreen(); document.getElementById('violationModal').classList.add('hidden'); }
+        function startTimer() { setInterval(() => { if(testActive) { timeLeft--; const m = Math.floor(timeLeft/60), s = timeLeft%60; document.getElementById('timer').innerText = `${m}:${s<10?'0'+s:s}`; } }, 1000); }
+        function submitFinal(failed = false) {
+            testActive = false;
+            proctorActive = false;
+            if(document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+            if(!failed && score >= 50) confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+            renderResults();
+        }
+
+        function renderResults() {
+            document.getElementById('testInterface').classList.add('hidden');
+            document.getElementById('aiCameraContainer').classList.add('hidden');
+            document.getElementById('resultsPage').classList.remove('hidden');
+            document.getElementById('resScore').innerText = score;
+            const st = document.getElementById('resStatus');
+            st.innerText = score >= 50 ? "Passed" : "Failed";
+            st.className = `text-2xl font-black mt-2 ${score >= 50 ? 'text-emerald-500' : 'text-red-500'}`;
+            const ctx = document.getElementById('accuracyChart').getContext('2d');
+            new Chart(ctx, { type: 'doughnut', data: { datasets: [{ data: [score, 100-score], backgroundColor: ['#6366f1', '#f1f5f9'], borderWidth: 0, borderRadius: 5 }] }, options: { cutout: '80%', plugins: { legend: { display: false } } } });
+            lucide.createIcons();
+        }
+
+        window.onload = initPython;
+    </script>
+</body>
+</html>
